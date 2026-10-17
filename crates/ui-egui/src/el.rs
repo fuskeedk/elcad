@@ -153,6 +153,8 @@ fn selected_cable(state: &Value) -> Option<&Value> {
 
 fn sync_form(form: &mut Form, cable: &Value) {
     let handle = cable.get("handle").and_then(Value::as_str).unwrap_or("").to_string();
+    // Keep what the user is typing. Reloading every frame put Ib back to 16 A
+    // before Enter or a click elsewhere could save it.
     if form.handle == handle {
         return;
     }
@@ -177,7 +179,9 @@ fn cable_form(app: &mut CadApp, ui: &mut egui::Ui, form: &mut Form, cable: &Valu
     ui.label(RichText::new(cable.get("name").and_then(Value::as_str).unwrap_or("Kabel")).strong().color(t.text));
     ui.label("Kabeltype");
     let edit = ui.add(egui::TextEdit::singleline(&mut form.designation).hint_text("5G1,5").desired_width(160.0).id(egui::Id::new("el-kabeltype")));
-    if edit.lost_focus() && edit.changed() {
+    let stored_designation = cable.get("designation").and_then(Value::as_str).unwrap_or("");
+    // `changed()` is only the keystroke frame. Enter and a click elsewhere lose focus later.
+    if edit.lost_focus() && form.designation != stored_designation {
         set(app, &handle, json!({ "designation": form.designation }));
     }
     ui.label(
@@ -202,10 +206,7 @@ fn cable_form(app: &mut CadApp, ui: &mut egui::Ui, form: &mut Form, cable: &Valu
     ui.horizontal(|ui| {
         ui.label("Spænding (V)");
         let v = ui.add(egui::TextEdit::singleline(&mut form.voltage).desired_width(70.0).id(egui::Id::new("el-u")));
-        if v.lost_focus()
-            && v.changed()
-            && let Some(n) = parse_da(&form.voltage)
-        {
+        if let Some(n) = commit_number(&v, &form.voltage, cable.get("voltage").and_then(Value::as_f64).unwrap_or(230.0)) {
             set(app, &handle, json!({ "voltage": n }));
         }
         ui.label("Belastede ledere");
@@ -222,19 +223,16 @@ fn cable_form(app: &mut CadApp, ui: &mut egui::Ui, form: &mut Form, cable: &Valu
     ui.horizontal(|ui| {
         ui.label("Strøm Ib (A)");
         let e = ui.add(egui::TextEdit::singleline(&mut form.current).desired_width(60.0).id(egui::Id::new("el-i")));
-        if e.lost_focus()
-            && e.changed()
-            && let Some(n) = parse_da(&form.current)
-        {
+        if let Some(n) = commit_number(&e, &form.current, cable.get("I").and_then(Value::as_f64).unwrap_or(16.0)) {
             set(app, &handle, json!({ "I": n }));
+            form.current = fmt_num(n, 1);
         }
         ui.label("Længde (m)");
         let e = ui.add(egui::TextEdit::singleline(&mut form.length).desired_width(70.0).id(egui::Id::new("el-l")));
-        if e.lost_focus()
-            && e.changed()
-            && let Some(n) = parse_da(&form.length)
-        {
+        let shown_len = shown_length(cable);
+        if let Some(n) = commit_number(&e, &form.length, shown_len) {
             set(app, &handle, json!({ "lengthM": n, "lengthMode": "manual" }));
+            form.length = fmt_num(n, 2);
         }
     });
     let draw = cable.get("lengthMode").and_then(Value::as_str) == Some("draw");
@@ -249,18 +247,12 @@ fn cable_form(app: &mut CadApp, ui: &mut egui::Ui, form: &mut Form, cable: &Valu
     ui.horizontal(|ui| {
         ui.label("cos φ");
         let e = ui.add(egui::TextEdit::singleline(&mut form.cosphi).desired_width(50.0).id(egui::Id::new("el-cos")));
-        if e.lost_focus()
-            && e.changed()
-            && let Some(n) = parse_da(&form.cosphi)
-        {
+        if let Some(n) = commit_number(&e, &form.cosphi, cable.get("cosphi").and_then(Value::as_f64).unwrap_or(0.9)) {
             set(app, &handle, json!({ "cosphi": n }));
         }
         ui.label("ΔU max %");
         let e = ui.add(egui::TextEdit::singleline(&mut form.drop).desired_width(40.0).id(egui::Id::new("el-drop")));
-        if e.lost_focus()
-            && e.changed()
-            && let Some(n) = parse_da(&form.drop)
-        {
+        if let Some(n) = commit_number(&e, &form.drop, cable.get("dropPctLimit").and_then(Value::as_f64).unwrap_or(3.0)) {
             set(app, &handle, json!({ "dropPct": n }));
         }
     });
@@ -419,7 +411,7 @@ fn impedance_row(app: &mut CadApp, ui: &mut egui::Ui, form: &mut Form) {
         {
             ui.label(label);
             let e = ui.add(egui::TextEdit::singleline(buf).desired_width(52.0).id(egui::Id::new(id)));
-            if e.lost_focus() && e.changed() {
+            if e.lost_focus() {
                 commit = true;
             }
         }
@@ -450,6 +442,24 @@ fn loaded_label(loaded: &str) -> &'static str {
         "4" => "4 (L1 L2 L3 N)",
         _ => "2 (L+N)",
     }
+}
+
+fn shown_length(cable: &Value) -> f64 {
+    if cable.get("lengthMode").and_then(Value::as_str) == Some("draw") {
+        cable.get("usedM").and_then(Value::as_f64).unwrap_or(0.0)
+    } else {
+        cable.get("lengthM").and_then(Value::as_f64).unwrap_or(25.0)
+    }
+}
+
+/// A typed number is saved when the field loses focus, including a click elsewhere.
+/// The keystroke frame and the focus-loss frame are not the same frame.
+fn commit_number(resp: &egui::Response, text: &str, stored: f64) -> Option<f64> {
+    if !resp.lost_focus() {
+        return None;
+    }
+    let n = parse_da(text)?;
+    if (n - stored).abs() <= 1e-6 { None } else { Some(n) }
 }
 
 fn parse_da(s: &str) -> Option<f64> {

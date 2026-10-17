@@ -287,6 +287,61 @@ fn house_symbol_cable_and_designation_stay_at_the_circuit_voltage() {
     assert!(chosen + 1e-9 >= 6.0, "4G6 never goes below 6, got {chosen}");
 }
 
+#[test]
+fn typed_ib_13_is_what_the_calculation_uses() {
+    let mut s = Session::new();
+    let cable = s.execute("el.cable", &json!({"points": [[0.0, 0.0], [10.0, 0.0]]})).unwrap();
+    let handle = cable["handle"].as_str().unwrap().to_string();
+    let before = cable_row(&mut s, &handle);
+    assert!((before["I"].as_f64().unwrap() - 16.0).abs() < 1e-9, "a new cable starts at 16 A");
+
+    s.execute(
+        "el.set",
+        &json!({
+            "handle": handle,
+            "I": 13.0,
+            "lengthMode": "manual",
+            "lengthM": 24.88,
+            "phase": "1",
+            "voltage": 230.0,
+            "loaded": "2",
+            "cosphi": 0.9,
+            "dropPct": 3.0,
+            "sectionMode": "manual",
+            "section": 2.5,
+        }),
+    )
+    .unwrap();
+
+    let row = cable_row(&mut s, &handle);
+    assert!((row["I"].as_f64().unwrap() - 13.0).abs() < 1e-9, "Ib did not stay at 13 A: {row}");
+    assert!((row["lengthM"].as_f64().unwrap() - 24.88).abs() < 1e-9, "{row}");
+    assert_eq!(row["phase"], json!("1"));
+    assert!((row["voltage"].as_f64().unwrap() - 230.0).abs() < 1e-9);
+    assert!((row["cosphi"].as_f64().unwrap() - 0.9).abs() < 1e-9);
+    assert!((row["dropPctLimit"].as_f64().unwrap() - 3.0).abs() < 1e-9);
+    let result = &row["result"];
+    assert!((result["I"].as_f64().unwrap() - 13.0).abs() < 1e-9, "analyze did not use 13 A: {result}");
+    assert!((result["L"].as_f64().unwrap() - 24.88).abs() < 1e-9, "{result}");
+    assert!((result["section"].as_f64().unwrap() - 2.5).abs() < 1e-9, "{result}");
+    assert_eq!(result["phase"], json!("1"));
+    assert!((result["U"].as_f64().unwrap() - 230.0).abs() < 1e-9);
+    let drop_v = result["dropV"].as_f64().unwrap();
+    let drop_pct = result["dropPct"].as_f64().unwrap();
+    assert!((drop_v - 4.34).abs() < 0.02, "13 A at 24.88 m, 2.5 mm² should be about 4.34 V, got {drop_v}");
+    assert!((drop_pct - 1.89).abs() < 0.02, "13 A should be about 1.89 %, got {drop_pct}");
+
+    let sixteen = calc::analyze(&Input { i: 16.0, l: 24.88, section_lock: Some(2.5), ..Input::default() });
+    assert!((sixteen.drop_v - 5.34).abs() < 0.02, "16 A reference drop {}", sixteen.drop_v);
+    assert!((drop_v - sixteen.drop_v).abs() > 0.5, "13 A drop {drop_v} V matched the 16 A drop {} V", sixteen.drop_v);
+
+    s.execute("el.set", &json!({"handle": handle, "designation": "3G1,5"})).unwrap();
+    let again = cable_row(&mut s, &handle);
+    assert!((again["I"].as_f64().unwrap() - 13.0).abs() < 1e-9, "a later edit put Ib back to 16 A");
+    assert!((again["result"]["I"].as_f64().unwrap() - 13.0).abs() < 1e-9, "{again}");
+    assert!((again["voltage"].as_f64().unwrap() - 230.0).abs() < 1e-9);
+}
+
 fn cable_row(s: &mut Session, handle: &str) -> serde_json::Value {
     let state = s.execute("el.state", &json!({})).unwrap();
     state["cables"].as_array().unwrap().iter().find(|c| c["handle"] == handle).unwrap().clone()
