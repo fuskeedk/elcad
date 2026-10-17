@@ -105,6 +105,20 @@ struct Item {
     drawn: Option<f64>,
 }
 
+fn touches_lighting(points: &[Vec2], symbols: &[(Handle, SymbolRec, Vec2)], tol: f64) -> bool {
+    if !tol.is_finite() || tol < 0.0 {
+        return false;
+    }
+    points.iter().any(|p| symbols.iter().any(|(_, sym, at)| model::is_lighting_symbol(&sym.kind) && p.dist(*at) <= tol))
+}
+
+fn lighting_on(s: &Session, points: &[Vec2]) -> bool {
+    let Ok(d) = s.doc() else { return false };
+    let tol = model::symbol_world(d.header.i64("INSUNITS", 0)) / 4.0;
+    let (_, _, symbols) = collect(d);
+    touches_lighting(points, &symbols, tol)
+}
+
 fn poly_len(e: &Entity) -> Option<f64> {
     let EntityKind::LwPolyline(pl) = &e.kind else { return None };
     if pl.vertices.len() < 2 {
@@ -244,6 +258,7 @@ pub fn snapshot(s: &Session) -> Result<Value> {
             "drawnM": item.drawn.map(|u| u * model::metres_per_unit(ins)).filter(|m| m.is_finite()).map(|m| json!(m)).unwrap_or(Value::Null),
             "usedM": len,
             "cosphi": item.cable.cosphi,
+            "anvendelse": item.cable.anvendelse,
             "dropPctLimit": item.cable.drop_pct,
             "material": item.cable.material,
             "brand": item.cable.brand,
@@ -285,16 +300,18 @@ pub fn place_cable(s: &mut Session, points: &[Vec2]) -> Result<Handle> {
         return Err(crate::EngineError::Other("Et kabel skal have mindst to punkter.".into()));
     }
     let space = s.space();
-    let n = {
+    let (n, lighting) = {
         let d = s.doc()?;
-        let (_, items, _) = collect(d);
-        items.len() + 1
+        let (_, items, symbols) = collect(d);
+        let tol = model::symbol_world(d.header.i64("INSUNITS", 0)) / 4.0;
+        (items.len() + 1, touches_lighting(points, &symbols, tol))
     };
     let insunits = s.doc()?.header.i64("INSUNITS", 0);
     let width = (model::symbol_world(insunits) / 18.0).max(0.0);
     s.doc_mut().map(house::ensure_layers)?;
     let mut cable = Cable::new(n);
     cable.length_mode = "draw".into();
+    cable.apply_default_anvendelse(lighting);
     let mut common = s.current_common();
     common.layer = "E-KABEL".into();
     common.color = cadcraft_color::Color::Index(CABLE_COLORS[(n - 1) % CABLE_COLORS.len()]);
@@ -320,6 +337,10 @@ pub fn update_cable_points(s: &mut Session, h: Handle, points: &[Vec2]) -> Resul
             pl.const_width = w;
         }
     })?;
+    if let Ok(mut cable) = cable_of(s, h) {
+        cable.apply_default_anvendelse(lighting_on(s, points));
+        write_cable(s, h, &cable)?;
+    }
     Ok(())
 }
 
@@ -407,8 +428,12 @@ pub fn patch_cable(cable: &mut Cable, p: &Value) -> std::result::Result<(), Stri
     if let Some(c) = p.get("cosphi").and_then(Value::as_f64).filter(|c| c.is_finite()) {
         cable.cosphi = c;
     }
+    if let Some(a) = p.get("anvendelse").and_then(Value::as_str) {
+        cable.set_anvendelse(a)?;
+    }
     if let Some(d) = finite_pos(p.get("dropPct").and_then(Value::as_f64)) {
         cable.drop_pct = d;
+        cable.drop_custom = true;
     }
     if let Some(m) = p.get("material").and_then(Value::as_str) {
         cable.material = if m == "al" { "al" } else { "cu" }.into();

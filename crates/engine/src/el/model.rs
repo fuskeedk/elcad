@@ -4,6 +4,7 @@
 //! It never changes phase, voltage or the number of loaded conductors.
 //! The number after G or X is the minimum section for every core count.
 //! Auto sizing may pick a larger section for spændingsfald or Iz.
+//! Allowed voltage drop follows DS/HD 60364 table G.52.1: 3 % for lighting, 5 % otherwise.
 //! 5G1,5 from a switch is often 230 V: mellemledning, fase, nul and jord.
 
 use cadcraft_doc::{Handle, RawTag};
@@ -154,8 +155,18 @@ pub struct Cable {
     pub loaded: String,
     #[serde(default = "cos_09")]
     pub cosphi: f64,
-    #[serde(default = "drop_3")]
+    /// `"lys"` (lighting, ΔU 3 %) or `"andet"` (everything else, ΔU 5 %).
+    #[serde(default = "andet")]
+    pub anvendelse: String,
+    /// DS/HD 60364 table G.52.1, unless the user typed a limit after choosing Anvendelse.
+    #[serde(default = "drop_5")]
     pub drop_pct: f64,
+    /// The user typed ΔU max. It is kept until Anvendelse changes.
+    #[serde(default)]
+    pub drop_custom: bool,
+    /// The user chose Anvendelse. A tied lamp no longer changes it.
+    #[serde(default)]
+    pub anvendelse_chosen: bool,
     #[serde(default = "cu")]
     pub material: String,
     #[serde(default = "nkt")]
@@ -207,8 +218,30 @@ fn loaded_2() -> String {
 fn cos_09() -> f64 {
     0.9
 }
-fn drop_3() -> f64 {
-    3.0
+fn andet() -> String {
+    "andet".into()
+}
+fn drop_5() -> f64 {
+    5.0
+}
+
+/// DS/HD 60364 table G.52.1. Lighting is 3 %. Every other circuit is 5 %.
+pub fn drop_limit_for(anvendelse: &str) -> f64 {
+    if anvendelse == "lys" { 3.0 } else { 5.0 }
+}
+
+/// A lamp or lampeudtag. Sockets, switches and the other symbols are not lighting.
+pub fn is_lighting_symbol(kind: &str) -> bool {
+    let k = kind.trim();
+    k.eq_ignore_ascii_case("lampe") || k.eq_ignore_ascii_case("udtag") || k.eq_ignore_ascii_case("lampeudtag")
+}
+
+pub fn parse_anvendelse(text: &str) -> Option<&'static str> {
+    match text.trim().to_ascii_lowercase().as_str() {
+        "lys" => Some("lys"),
+        "andet" => Some("andet"),
+        _ => None,
+    }
 }
 fn cu() -> String {
     "cu".into()
@@ -275,6 +308,30 @@ impl Cable {
         }
     }
 
+    /// Lys sets ΔU max to 3 %. Andet sets it to 5 %. A typed limit is replaced.
+    pub fn set_anvendelse(&mut self, text: &str) -> Result<(), String> {
+        let Some(anvendelse) = parse_anvendelse(text) else {
+            return Err("Anvendelse skal være Lys eller Andet".into());
+        };
+        self.anvendelse = anvendelse.into();
+        self.drop_pct = drop_limit_for(anvendelse);
+        self.drop_custom = false;
+        self.anvendelse_chosen = true;
+        Ok(())
+    }
+
+    /// Default from whether a lampe or lampeudtag is tied to this cable.
+    /// Does nothing after the user has chosen Anvendelse.
+    pub fn apply_default_anvendelse(&mut self, lighting: bool) {
+        if self.anvendelse_chosen {
+            return;
+        }
+        self.anvendelse = if lighting { "lys" } else { "andet" }.into();
+        if !self.drop_custom {
+            self.drop_pct = drop_limit_for(&self.anvendelse);
+        }
+    }
+
     /// Phase writes the matching voltage (230 V or 400 V) unless `keep_voltage`.
     pub fn set_phase(&mut self, phase: &str, keep_voltage: bool) {
         self.phase = if phase.trim() == "3" { "3" } else { "1" }.into();
@@ -296,7 +353,10 @@ impl Default for Cable {
             voltage: 230.0,
             loaded: loaded_2(),
             cosphi: 0.9,
-            drop_pct: 3.0,
+            anvendelse: andet(),
+            drop_pct: 5.0,
+            drop_custom: false,
+            anvendelse_chosen: false,
             material: cu(),
             brand: nkt(),
             method: b2(),

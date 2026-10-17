@@ -38,7 +38,7 @@ impl Default for Form {
             current: "16".into(),
             length: "25".into(),
             cosphi: "0,9".into(),
-            drop: "3".into(),
+            drop: "5".into(),
             temp: "30".into(),
             r1: "0".into(),
             x1: "0".into(),
@@ -169,7 +169,7 @@ fn sync_form(form: &mut Form, cable: &Value) {
     };
     form.length = fmt_num(shown, 2);
     form.cosphi = fmt_num(cable.get("cosphi").and_then(Value::as_f64).unwrap_or(0.9), 2);
-    form.drop = fmt_num(cable.get("dropPctLimit").and_then(Value::as_f64).unwrap_or(3.0), 1);
+    form.drop = fmt_num(cable.get("dropPctLimit").and_then(Value::as_f64).unwrap_or(5.0), 1);
     form.temp = fmt_num(cable.get("temp").and_then(Value::as_f64).unwrap_or(30.0), 0);
 }
 
@@ -244,6 +244,25 @@ fn cable_form(app: &mut CadApp, ui: &mut egui::Ui, form: &mut Form, cable: &Valu
             set(app, &handle, json!({ "lengthMode": "manual", "lengthM": n }));
         }
     }
+    let anvendelse = cable.get("anvendelse").and_then(Value::as_str).unwrap_or("andet").to_string();
+    ui.horizontal(|ui| {
+        ui.label("Anvendelse");
+        let mut now = anvendelse.clone();
+        let label = if anvendelse == "lys" { "Lys" } else { "Andet" };
+        egui::ComboBox::from_id_salt("el-anvendelse").selected_text(label).show_ui(ui, |ui| {
+            ui.selectable_value(&mut now, "lys".into(), "Lys");
+            ui.selectable_value(&mut now, "andet".into(), "Andet");
+        });
+        if now != anvendelse {
+            set(app, &handle, json!({ "anvendelse": now }));
+            form.drop = if now == "lys" { "3".into() } else { "5".into() };
+        }
+    });
+    ui.label(
+        RichText::new("DS/HD 60364 tabel G.52.1. Lys er 3 %. Andet er 5 %. Et tal du skriver i ΔU max bliver stående, til du skifter anvendelse.")
+            .color(t.text_dim)
+            .size(11.5),
+    );
     ui.horizontal(|ui| {
         ui.label("cos φ");
         let e = ui.add(egui::TextEdit::singleline(&mut form.cosphi).desired_width(50.0).id(egui::Id::new("el-cos")));
@@ -252,7 +271,7 @@ fn cable_form(app: &mut CadApp, ui: &mut egui::Ui, form: &mut Form, cable: &Valu
         }
         ui.label("ΔU max %");
         let e = ui.add(egui::TextEdit::singleline(&mut form.drop).desired_width(40.0).id(egui::Id::new("el-drop")));
-        if let Some(n) = commit_number(&e, &form.drop, cable.get("dropPctLimit").and_then(Value::as_f64).unwrap_or(3.0)) {
+        if let Some(n) = commit_number(&e, &form.drop, cable.get("dropPctLimit").and_then(Value::as_f64).unwrap_or(5.0)) {
             set(app, &handle, json!({ "dropPct": n }));
         }
     });

@@ -158,17 +158,25 @@ fn every_designation_is_a_floor_and_a_long_run_may_rise() {
     assert!((at(80.0) - 10.0).abs() < 1e-9, "80 m → {}", at(80.0));
 
     let mut cable = Cable::default();
+    assert_eq!(cable.anvendelse, "andet");
+    assert!((cable.drop_pct - 5.0).abs() < 1e-9);
     for text in ["3G1,5", "3G1.5", "7G1,5", "7G1.5", "5G1,5"] {
         cable.apply_designation(text).unwrap();
         let out = model::analyze_cable(&cable, 80.0, Z::ZERO);
-        assert!((out.section - 10.0).abs() < 1e-9, "{text} at 80 m chose {}", out.section);
+        assert!((out.section - 4.0).abs() < 1e-9, "{text} at 80 m and 5 % chose {}", out.section);
         assert!(!out.locked, "{text} must not lock");
         assert_eq!(out.min_section, Some(1.5), "{text}");
         assert_eq!(out.phase, "1");
         assert!((out.u - 230.0).abs() < 1e-9);
         assert_eq!(out.n_loaded, 2);
+        assert!((out.drop_limit_pct - 5.0).abs() < 1e-9, "{text}");
         assert!(out.drop_ok && out.current_ok, "{text}");
     }
+    cable.set_anvendelse("lys").unwrap();
+    let lit = model::analyze_cable(&cable, 80.0, Z::ZERO);
+    assert!((lit.section - 10.0).abs() < 1e-9, "lighting 3 % at 80 m chose {}", lit.section);
+    assert!((cable.voltage - 230.0).abs() < 1e-9);
+    assert_eq!(cable.phase, "1");
 
     cable.apply_designation("4G2,5").unwrap();
     cable.current = 10.0;
@@ -194,7 +202,7 @@ fn house_symbol_cable_and_designation_stay_at_the_circuit_voltage() {
     let symbol = s.execute("el.symbol", &json!({"kind": "stik", "at": [100.0, 100.0]})).unwrap();
     assert!(symbol["handle"].as_str().is_some(), "{symbol}");
     for kind in ["afbryder", "lampe", "tavle", "stik2", "korr", "kryds", "udtag", "ude", "daase", "kraft", "komfur", "tekst"] {
-        s.execute("el.symbol", &json!({"kind": kind, "at": [120.0, 80.0]})).unwrap_or_else(|e| panic!("{kind}: {e}"));
+        s.execute("el.symbol", &json!({"kind": kind, "at": [8000.0, 8000.0]})).unwrap_or_else(|e| panic!("{kind}: {e}"));
     }
 
     let cable = s.execute("el.cable", &json!({"points": [[100.0, 100.0], [100.0, 220.0]]})).unwrap();
@@ -216,7 +224,9 @@ fn house_symbol_cable_and_designation_stay_at_the_circuit_voltage() {
     assert_eq!(result["U"], json!(230.0), "{result}");
     assert_eq!(result["phase"], json!("1"), "{result}");
     assert_eq!(result["nLoaded"], json!(2), "{result}");
-    assert_eq!(result["section"], json!(10.0), "{result}");
+    assert_eq!(row["anvendelse"], json!("andet"));
+    assert!((row["dropPctLimit"].as_f64().unwrap() - 5.0).abs() < 1e-9, "{row}");
+    assert_eq!(result["section"], json!(4.0), "{result}");
     assert_eq!(result["minSection"], json!(1.5), "{result}");
     assert_eq!(result["locked"], json!(false), "{result}");
     assert_eq!(result["currentOk"], json!(true), "{result}");
@@ -229,7 +239,7 @@ fn house_symbol_cable_and_designation_stay_at_the_circuit_voltage() {
     s.execute("el.set", &json!({"handle": handle, "designation": "7G1,5"})).unwrap();
     let row = cable_row(&mut s, handle);
     assert_eq!(row["cores"], json!(7));
-    assert_eq!(row["result"]["section"], json!(10.0), "{}", row["result"]);
+    assert_eq!(row["result"]["section"], json!(4.0), "{}", row["result"]);
     assert_eq!(row["phase"], json!("1"));
     assert_eq!(row["voltage"], json!(230.0));
     assert_eq!(row["sectionMode"], json!("auto"));
@@ -340,6 +350,105 @@ fn typed_ib_13_is_what_the_calculation_uses() {
     assert!((again["I"].as_f64().unwrap() - 13.0).abs() < 1e-9, "a later edit put Ib back to 16 A");
     assert!((again["result"]["I"].as_f64().unwrap() - 13.0).abs() < 1e-9, "{again}");
     assert!((again["voltage"].as_f64().unwrap() - 230.0).abs() < 1e-9);
+}
+
+#[test]
+fn socket_run_stays_at_1_5_and_lighting_uses_3_percent() {
+    assert!(model::is_lighting_symbol("lampe"));
+    assert!(model::is_lighting_symbol("udtag"));
+    assert!(model::is_lighting_symbol("Lampeudtag"));
+    for kind in ["stik", "stik2", "afbryder", "korr", "kryds", "tavle", "ude", "daase", "kraft", "komfur", "tekst"] {
+        assert!(!model::is_lighting_symbol(kind), "{kind}");
+    }
+
+    let mut s = Session::new();
+    let plain = s.execute("el.cable", &json!({"points": [[0.0, -2000.0], [10.0, -2000.0]]})).unwrap();
+    let plain_h = plain["handle"].as_str().unwrap().to_string();
+    let row = cable_row(&mut s, &plain_h);
+    assert_eq!(row["anvendelse"], json!("andet"));
+    assert!((row["dropPctLimit"].as_f64().unwrap() - 5.0).abs() < 1e-9, "{row}");
+
+    s.execute("el.symbol", &json!({"kind": "stik", "at": [0.0, 0.0]})).unwrap();
+    s.execute("el.symbol", &json!({"kind": "afbryder", "at": [0.0, 1000.0]})).unwrap();
+    s.execute("el.symbol", &json!({"kind": "lampe", "at": [0.0, 2000.0]})).unwrap();
+    s.execute("el.symbol", &json!({"kind": "udtag", "at": [0.0, 3000.0]})).unwrap();
+
+    let socket = s.execute("el.cable", &json!({"points": [[0.0, 0.0], [10.0, 0.0]]})).unwrap();
+    let socket_h = socket["handle"].as_str().unwrap().to_string();
+    let row = cable_row(&mut s, &socket_h);
+    assert_eq!(row["anvendelse"], json!("andet"), "stikkontakt is not lighting: {row}");
+    assert!((row["dropPctLimit"].as_f64().unwrap() - 5.0).abs() < 1e-9);
+
+    let switched = s.execute("el.cable", &json!({"points": [[0.0, 1000.0], [10.0, 1000.0]]})).unwrap();
+    let switched_h = switched["handle"].as_str().unwrap().to_string();
+    assert_eq!(cable_row(&mut s, &switched_h)["anvendelse"], json!("andet"), "afbryder is not lighting");
+
+    let lamp = s.execute("el.cable", &json!({"points": [[0.0, 2000.0], [10.0, 2000.0]]})).unwrap();
+    let lamp_h = lamp["handle"].as_str().unwrap().to_string();
+    let row = cable_row(&mut s, &lamp_h);
+    assert_eq!(row["anvendelse"], json!("lys"), "{row}");
+    assert!((row["dropPctLimit"].as_f64().unwrap() - 3.0).abs() < 1e-9);
+
+    let outlet = s.execute("el.cable", &json!({"points": [[0.0, 3000.0], [10.0, 3000.0]]})).unwrap();
+    let outlet_h = outlet["handle"].as_str().unwrap().to_string();
+    assert_eq!(cable_row(&mut s, &outlet_h)["anvendelse"], json!("lys"), "lampeudtag is lighting");
+    assert!((cable_row(&mut s, &outlet_h)["dropPctLimit"].as_f64().unwrap() - 3.0).abs() < 1e-9);
+
+    s.execute(
+        "el.set",
+        &json!({
+            "handle": socket_h,
+            "I": 13.0,
+            "lengthMode": "manual",
+            "lengthM": 25.0,
+            "phase": "1",
+            "voltage": 230.0,
+            "designation": "5G1,5",
+        }),
+    )
+    .unwrap();
+    let row = cable_row(&mut s, &socket_h);
+    assert_eq!(row["phase"], json!("1"));
+    assert!((row["voltage"].as_f64().unwrap() - 230.0).abs() < 1e-9);
+    assert_eq!(row["anvendelse"], json!("andet"));
+    assert!((row["result"]["I"].as_f64().unwrap() - 13.0).abs() < 1e-9, "{}", row["result"]);
+    assert_eq!(row["result"]["section"], json!(1.5), "5 % keeps 1,5 mm²: {}", row["result"]);
+    assert_eq!(row["result"]["locked"], json!(false));
+    assert_eq!(row["result"]["dropOk"], json!(true), "{}", row["result"]);
+    let drop_v = row["result"]["dropV"].as_f64().unwrap();
+    let drop_pct = row["result"]["dropPct"].as_f64().unwrap();
+    assert!((drop_v - 7.11).abs() < 0.05, "13 A drop {drop_v} V");
+    assert!((drop_pct - 3.09).abs() < 0.05, "13 A drop {drop_pct} %");
+
+    for text in ["3G1,5", "7G1,5"] {
+        s.execute("el.set", &json!({"handle": socket_h, "designation": text})).unwrap();
+        let row = cable_row(&mut s, &socket_h);
+        assert_eq!(row["result"]["section"], json!(1.5), "{text} {}", row["result"]);
+        assert_eq!(row["phase"], json!("1"));
+        assert!((row["voltage"].as_f64().unwrap() - 230.0).abs() < 1e-9, "{text}");
+        assert_eq!(row["anvendelse"], json!("andet"));
+        assert_eq!(row["sectionMode"], json!("auto"));
+    }
+
+    s.execute("el.set", &json!({"handle": socket_h, "anvendelse": "lys"})).unwrap();
+    let row = cable_row(&mut s, &socket_h);
+    assert_eq!(row["anvendelse"], json!("lys"));
+    assert!((row["dropPctLimit"].as_f64().unwrap() - 3.0).abs() < 1e-9);
+    assert_eq!(row["result"]["section"], json!(2.5), "3 % steps up: {}", row["result"]);
+    assert!((row["voltage"].as_f64().unwrap() - 230.0).abs() < 1e-9);
+    assert_eq!(row["phase"], json!("1"));
+
+    s.execute("el.set", &json!({"handle": socket_h, "dropPct": 4.0})).unwrap();
+    let row = cable_row(&mut s, &socket_h);
+    assert_eq!(row["anvendelse"], json!("lys"));
+    assert!((row["dropPctLimit"].as_f64().unwrap() - 4.0).abs() < 1e-9, "typed ΔU stays");
+
+    s.execute("el.set", &json!({"handle": socket_h, "anvendelse": "andet"})).unwrap();
+    let row = cable_row(&mut s, &socket_h);
+    assert_eq!(row["anvendelse"], json!("andet"));
+    assert!((row["dropPctLimit"].as_f64().unwrap() - 5.0).abs() < 1e-9, "Anvendelse replaces the typed limit");
+    assert_eq!(row["result"]["section"], json!(1.5), "{}", row["result"]);
+    assert!((row["voltage"].as_f64().unwrap() - 230.0).abs() < 1e-9);
 }
 
 fn cable_row(s: &mut Session, handle: &str) -> serde_json::Value {

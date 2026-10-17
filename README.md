@@ -130,6 +130,11 @@ minimum. The core count does not change phase, voltage or the number of loaded c
 `5G1,5` from a switch is often 230 V (mellemledning, fase, nul, jord). 1-fase stays 230 V.
 3-fase stays 400 V.
 
+Allowed voltage drop follows DS/HD 60364 table G.52.1. **Anvendelse** `Lys` sets ΔU max to
+3 %. `Andet` sets it to 5 %, and that is the default. A cable tied to a lampe or lampeudtag
+starts as Lys. A stikkontakt, afbryder or any other symbol does not. A limit typed after that
+stays until Anvendelse is changed again.
+
 Desktop and web UI builds require Rust 1.95 or later. The core workspace's declared minimum
 remains Rust 1.90.
 
