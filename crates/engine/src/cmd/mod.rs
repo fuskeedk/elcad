@@ -12,6 +12,7 @@ mod draw;
 mod draw2;
 mod draworder;
 mod edit;
+mod el;
 mod exchange;
 pub mod file;
 mod gripcmds;
@@ -177,6 +178,7 @@ pub fn command_specs() -> &'static [CommandSpec] {
         v.extend(view::specs());
         v.extend(draw::specs());
         v.extend(draw2::specs());
+        v.extend(el::specs());
         v.extend(annotate::specs());
         v.extend(mleader_edit::specs());
         v.extend(annoscale::specs());

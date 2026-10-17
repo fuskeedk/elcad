@@ -114,6 +114,34 @@ numbers):
 | Interface languages | English, Ukrainian (Українська), Brazilian Portuguese (Português (Brasil)), German (Deutsch), Spanish (Español), Czech (Čeština), Russian (Русский), French (Français), Simplified Chinese (简体中文, with an installed CJK font), Italian (Italiano), Korean (한국어, with an installed Hangul font), Swedish (Svenska) and Arabic (العربية, with an installed Arabic font), live switching and a remembered Auto/system-language choice; [details](docs/localization.md) |
 | Automation | MCP server, JSON control channel, `cadcraft-cli` (info, convert, run, commands, mcp) |
 
+## El-tegninger
+
+This repository is a fork of [storytold/cadcraft](https://github.com/storytold/cadcraft). That
+repository cannot be pushed to, so the electrical work lives here. The drawing model is
+Cadcraft's: a house is the same floor plan (`sample::floor_plan` and the same wall, door and
+window construction), symbols are blocks, and cables are polylines. The calculation is the
+El-beregner from [sydsjel.dk/el](https://sydsjel.dk/el): Ik, spændingsfald and Iz.
+
+`Kabeltype` accepts `3G1,5`, `5G1,5`, `3G1.5`, `5G1.5`, `4G6` and `x`/`X`. The number after
+G or X sets and locks the cross-section. The core count does not change phase, voltage or the
+number of loaded conductors. `5G1,5` from a switch is often 230 V (mellemledning, fase, nul,
+jord). 1-fase stays 230 V. 3-fase stays 400 V.
+
+Desktop and web UI builds require Rust 1.95 or later. The core workspace's declared minimum
+remains Rust 1.90.
+
+```sh
+cargo run --release -p cadcraft
+```
+
+In the app: **Window → El-tegning**, or the **El** group in Tool Sets.
+
+1. **Tegn hus** or **Åbn plantegning**.
+2. Place a symbol (stikkontakt, afbryder, lampe, tavle, or the other installation symbols).
+3. **Kabel**, then pick the points and finish with Enter.
+4. Type `5G1,5` in **Kabeltype**. Leave the circuit at 1-fase, 230 V.
+5. The panel shows Iz, spændingsfald, Ikmax and Ikmin.
+
 ## Quick start
 
 Desktop and web UI builds require Rust 1.95 or later. The core workspace's declared minimum

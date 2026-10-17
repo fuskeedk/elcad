@@ -118,6 +118,11 @@ pub const DRAFTING: &[(&str, &[Tool], &[Tool])] = &[
             (Icon::Equal, "gcequal", "Equal"),
         ],
     ),
+    (
+        "El",
+        &[(Icon::Polyline, "el.cable", "Kabel"), (Icon::Rectangle, "el.house", "Tegn hus")],
+        &[(Icon::Circle, "el.symbol", "Symbol"), (Icon::Blocks, "el.floorplan", "Åbn plantegning")],
+    ),
 ];
 
 fn command_known(id: &str) -> bool {

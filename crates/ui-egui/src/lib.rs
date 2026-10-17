@@ -29,6 +29,7 @@ pub mod xrefs;
 
 pub mod dyngrips;
 pub mod dyninput;
+pub mod el;
 pub mod gpu;
 pub mod grip_dyn;
 pub mod i18n;
@@ -328,6 +329,12 @@ impl CadApp {
     pub fn start(&mut self, name: &str) {
         if menus::run_ui_command(self, name, &Value::Null).is_some() {
             return;
+        }
+        let raw = name.trim().trim_start_matches(['_', '\'']);
+        let resolved = cadcraft_engine::cmd::resolve_alias(&raw.to_ascii_lowercase());
+        let electrical = resolved == "el" || resolved.starts_with("el.");
+        if electrical {
+            let _ = menus::run_ui_command(self, "ui.panel.el", &Value::Null);
         }
         if let Err(e) = self.session.start(name) {
             self.session.echo(e.to_string());
