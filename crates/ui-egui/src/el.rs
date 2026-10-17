@@ -1,7 +1,8 @@
 //! El-tegning: symbols, cables and the calculation from the El-beregner.
 //!
-//! The panel reads `el.state` and writes through `el.set`. Core count in a
-//! cable type such as 5G1,5 locks the cross-section only.
+//! The panel reads `el.state` and writes through `el.set`. The number after
+//! G or X is the minimum section for every core count. It does not lock the
+//! section and does not change phase, voltage or loaded conductors.
 
 use cadcraft_doc::Handle;
 use egui::{Color32, RichText};
@@ -180,7 +181,7 @@ fn cable_form(app: &mut CadApp, ui: &mut egui::Ui, form: &mut Form, cable: &Valu
         set(app, &handle, json!({ "designation": form.designation }));
     }
     ui.label(
-        RichText::new("Tallet før G/X er kun betegnelsen. 5G1,5 fra en afbryder er ofte 230 V (mellemledning, fase, nul, jord). Fase, spænding og belastede ledere ændres ikke.")
+        RichText::new("Tallet efter G/X er mindste tværsnit for enhver betegnelse, også 3G1,5 og 7G1,5. Et langt kabel kan gå op til 2,5, 4, 6 mm² eller mere, når spændingsfald eller Iz kræver det. Tallet før G/X ændrer ikke fase, spænding eller belastede ledere.")
             .color(t.text_dim)
             .size(11.5),
     );
@@ -299,6 +300,14 @@ fn cable_form(app: &mut CadApp, ui: &mut egui::Ui, form: &mut Form, cable: &Valu
             }
         }
     });
+    if let Some(min) = cable.get("minSection").and_then(Value::as_f64) {
+        let note = if section > min + 1e-6 {
+            format!("Mindst {} mm² fra kabeltypen. Valgt {} mm², fordi spændingsfald eller Iz kræver mere.", fmt_num(min, 1), fmt_num(section, 1))
+        } else {
+            format!("Mindst {} mm² fra kabeltypen. Beregningen går ikke under det.", fmt_num(min, 1))
+        };
+        ui.label(RichText::new(note).color(t.text_dim).size(11.5));
+    }
     if let Some(cores) = cable.get("cores").and_then(Value::as_u64) {
         ui.label(
             RichText::new(format!("{cores} ledere i betegnelsen. Kredsen er stadig {}-fase {} V, {} belastede ledere.", phase, form.voltage, loaded))

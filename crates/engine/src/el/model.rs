@@ -1,8 +1,10 @@
 //! Installation records stored on drawing entities.
 //!
 //! A cable's core count (the number before G or X) is only the designation.
-//! 5G1,5 from a switch is often 230 V: mellemledning, fase, nul and jord.
 //! It never changes phase, voltage or the number of loaded conductors.
+//! The number after G or X is the minimum section for every core count.
+//! Auto sizing may pick a larger section for spændingsfald or Iz.
+//! 5G1,5 from a switch is often 230 V: mellemledning, fase, nul and jord.
 
 use cadcraft_doc::{Handle, RawTag};
 use serde::{Deserialize, Serialize};
@@ -93,6 +95,17 @@ pub fn section_in_list(section: f64, material: &str) -> Option<f64> {
     calc::sections_for(material).iter().find(|s| (**s - section).abs() < 1e-6).copied()
 }
 
+/// Minimum section from any designation, or `None` when the cable has none.
+/// The core count is ignored. The value is the first listed section at or above
+/// the number after G or X.
+pub fn minimum_section(cable: &Cable) -> Option<f64> {
+    let Designation::Parsed { section, .. } = parse_cable_designation(&cable.designation)? else {
+        return None;
+    };
+    let list = calc::sections_for(&cable.material);
+    list.iter().copied().find(|s| *s + 1e-9 >= section).or_else(|| list.last().copied())
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Supply {
@@ -155,7 +168,7 @@ pub struct Cable {
     pub sidelob: String,
     #[serde(default = "bundt")]
     pub sidelob_type: String,
-    /// `"auto"` or `"manual"`. A designation sets `"manual"`.
+    /// `"auto"` or `"manual"`. A designation leaves this on `"auto"`.
     #[serde(default = "auto_mode")]
     pub section_mode: String,
     #[serde(default = "sec_25")]
@@ -236,7 +249,9 @@ impl Cable {
         Cable { name: format!("Kabel {n}"), ..Cable::default() }
     }
 
-    /// Apply a Kabeltype string. A recognised section is locked.
+    /// Apply a Kabeltype string. The number after G or X is the minimum section.
+    /// Core count does not matter: 3G1,5, 5G1,5 and 7G1,5 all floor at 1,5 mm².
+    /// Auto sizing stays on, so a longer run can pick 2,5, 4, 6 mm² or more.
     /// Phase, voltage and loaded conductors are left as they are.
     /// Returns an error string when the text is not a usable designation.
     pub fn apply_designation(&mut self, text: &str) -> Result<(), String> {
@@ -253,10 +268,10 @@ impl Cable {
                 self.designation = text;
                 self.cores = Some(cores);
                 self.section = section;
-                self.section_mode = "manual".into();
+                self.section_mode = "auto".into();
                 Ok(())
             }
-            None => Err("Kabeltype skal ligne 5G1,5, 3G1.5, 4G6 eller 5x1,5".into()),
+            None => Err("Kabeltype skal ligne 3G1,5, 7G1,5, 4G2,5 eller 5x1,5".into()),
         }
     }
 
@@ -447,6 +462,7 @@ pub fn to_input(cable: &Cable, length: f64, up: Z) -> Input {
         breaker_type: cable.breaker_type.clone(),
         system_type: cable.system_type.clone(),
         section_lock: lock,
+        min_section: minimum_section(cable),
         up,
     }
 }

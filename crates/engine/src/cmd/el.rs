@@ -152,7 +152,7 @@ fn summary(s: &Session, h: Handle) -> String {
     let iz = result.and_then(|r| r.get("Iz")).and_then(Value::as_f64);
     let drop = result.and_then(|r| r.get("dropPct")).and_then(Value::as_f64);
     let ik = result.and_then(|r| r.get("Ikmax")).and_then(Value::as_f64);
-    let kind = if designation.is_empty() { format!("{section} mm²") } else { designation.to_string() };
+    let kind = if designation.is_empty() { format!("{section} mm²") } else { format!("{designation}, {section} mm²") };
     format!("{kind}: {phase}-fase {voltage:.0} V, {loaded} belastede ledere, Iz {}, ΔU {}, Ikmax {}.", fmt_a(iz), fmt_pct(drop), fmt_a(ik))
 }
 

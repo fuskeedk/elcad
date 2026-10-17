@@ -47,7 +47,11 @@ pub struct Input {
     pub in_amp: Option<i32>,
     pub breaker_type: String,
     pub system_type: String,
+    /// Exact section from the lock checkbox. A cable designation does not set this.
     pub section_lock: Option<f64>,
+    /// Smallest section the designation allows. `None` when there is no designation.
+    /// Auto selection never goes below it. Any core count uses the same floor.
+    pub min_section: Option<f64>,
     pub up: Z,
 }
 
@@ -71,6 +75,7 @@ impl Default for Input {
             breaker_type: "C".into(),
             system_type: "TN".into(),
             section_lock: None,
+            min_section: None,
             up: Z::ZERO,
         }
     }
@@ -96,6 +101,8 @@ pub struct Output {
     pub recommended_meets: bool,
     pub section: f64,
     pub locked: bool,
+    /// Listed section the designation will not go below. `None` without a designation.
+    pub min_section: Option<f64>,
     pub capacity: Option<f64>,
     pub corrected_capacity: Option<f64>,
     pub temp_used: f64,
@@ -151,6 +158,7 @@ impl Default for Output {
             recommended_meets: false,
             section: 0.0,
             locked: false,
+            min_section: None,
             capacity: None,
             corrected_capacity: None,
             temp_used: 0.0,
@@ -769,9 +777,25 @@ pub fn drop_voltage(section: f64, i: f64, lkm: f64, phase: &str, material: &str,
     k * i * lkm * (r1 * cos_phi + x1 * sin_phi)
 }
 
-fn find_min_section_for_drop(drop_v: f64, i: f64, lkm: f64, phase: &str, material: &str, cos_phi: f64) -> f64 {
+/// First listed section at or above `min_section`. `None` when there is no floor.
+fn listed_floor(material: &str, min_section: Option<f64>) -> Option<f64> {
+    let min = min_section.filter(|s| s.is_finite() && *s > 0.0)?;
     let list = sections_for(material);
-    for s in list {
+    list.iter().copied().find(|s| *s + 1e-9 >= min).or_else(|| list.last().copied())
+}
+
+fn sections_from(material: &str, floor: Option<f64>) -> Vec<f64> {
+    let list = sections_for(material);
+    let kept: Vec<f64> = match floor {
+        Some(floor) => list.iter().copied().filter(|s| *s + 1e-9 >= floor).collect(),
+        None => list.to_vec(),
+    };
+    if kept.is_empty() { list.to_vec() } else { kept }
+}
+
+fn find_min_section_for_drop(drop_v: f64, i: f64, lkm: f64, phase: &str, material: &str, cos_phi: f64, floor: Option<f64>) -> f64 {
+    let list = sections_from(material, floor);
+    for s in &list {
         if drop_voltage(*s, i, lkm, phase, material, cos_phi) <= drop_v {
             return *s;
         }
@@ -796,9 +820,10 @@ fn find_suggested(
     loaded_factor: f64,
     cos_phi: f64,
     brand: &str,
+    floor: Option<f64>,
 ) -> Suggested {
-    let list = sections_for(material);
-    for s in list {
+    let list = sections_from(material, floor);
+    for s in &list {
         if drop_voltage(*s, i, lkm, phase, material, cos_phi) > drop_v {
             continue;
         }
@@ -879,13 +904,20 @@ pub fn analyze(input: &Input) -> Output {
     let cos_phi = if (0.5..=1.0).contains(&input.cosphi) { input.cosphi } else { 0.9 };
     let drop_v_limit = (u * drop_pct) / 100.0;
     let lkm = l / 1000.0;
-    let min_drop = find_min_section_for_drop(drop_v_limit, i, lkm, phase, material, cos_phi);
-    let suggested = find_suggested(drop_v_limit, i, lkm, phase, method, material, temp_factor, gf, lf, cos_phi, brand);
-    let locked = input.section_lock.is_some();
+    let floor = listed_floor(material, input.min_section);
+    let min_drop = find_min_section_for_drop(drop_v_limit, i, lkm, phase, material, cos_phi, floor);
+    let suggested = find_suggested(drop_v_limit, i, lkm, phase, method, material, temp_factor, gf, lf, cos_phi, brand, floor);
     let mut section = input.section_lock.unwrap_or(suggested.section);
     if !sections_for(material).iter().any(|s| (*s - section).abs() < 1e-6) {
         section = suggested.section;
     }
+    // A designation is a floor, never a lock. An explicit lock below that floor is raised.
+    if let Some(floor) = floor
+        && section + 1e-9 < floor
+    {
+        section = suggested.section;
+    }
+    let locked = input.section_lock.is_some_and(|s| (s - section).abs() < 1e-6);
     let actual_drop_v = drop_voltage(section, i, lkm, phase, material, cos_phi);
     let actual_drop_pct = if u.abs() > 1e-12 { (actual_drop_v / u) * 100.0 } else { f64::INFINITY };
     let base_cap = get_capacity(method, section, material, brand);
@@ -955,6 +987,7 @@ pub fn analyze(input: &Input) -> Output {
         recommended_meets: suggested.meets,
         section,
         locked,
+        min_section: floor,
         capacity: base_cap,
         corrected_capacity: corrected,
         temp_used,

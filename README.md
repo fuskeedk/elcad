@@ -122,10 +122,13 @@ Cadcraft's: a house is the same floor plan (`sample::floor_plan` and the same wa
 window construction), symbols are blocks, and cables are polylines. The calculation is the
 El-beregner from [sydsjel.dk/el](https://sydsjel.dk/el): Ik, spændingsfald and Iz.
 
-`Kabeltype` accepts `3G1,5`, `5G1,5`, `3G1.5`, `5G1.5`, `4G6` and `x`/`X`. The number after
-G or X sets and locks the cross-section. The core count does not change phase, voltage or the
-number of loaded conductors. `5G1,5` from a switch is often 230 V (mellemledning, fase, nul,
-jord). 1-fase stays 230 V. 3-fase stays 400 V.
+`Kabeltype` accepts `3G1,5`, `3G1.5`, `5G1,5`, `7G1,5`, `4G2,5`, `4G6` and `x`/`X`. The number
+after G or X is the minimum cross-section for every core count. It does not lock the section.
+Auto selection picks the smallest section that meets voltage drop and Iz, and never goes below
+that minimum, so a long run may become 2,5, 4, 6 mm² or larger. No designation means no extra
+minimum. The core count does not change phase, voltage or the number of loaded conductors.
+`5G1,5` from a switch is often 230 V (mellemledning, fase, nul, jord). 1-fase stays 230 V.
+3-fase stays 400 V.
 
 Desktop and web UI builds require Rust 1.95 or later. The core workspace's declared minimum
 remains Rust 1.90.
